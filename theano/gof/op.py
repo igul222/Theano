@@ -402,7 +402,7 @@ class CLinkerOp(CLinkerObject):
         node : an Apply instance in the graph being compiled
         name : str
             A unique name to distinguish variables from those of other nodes.
-        sub : dict
+        sub
             A dictionary of values to substitute in the code.
             Most notably it contains a 'fail' entry that you should place in
             your code after setting a python exception to indicate an error.
@@ -438,7 +438,7 @@ class CLinkerOp(CLinkerObject):
         raise utils.MethodNotDefined("c_support_code_struct",
                                      type(self), self.__class__.__name__)
 
-    def c_cleanup_code_struct(self, node, name, sub):
+    def c_cleanup_code_struct(self, node, name):
         """
         Optional: return a code string specific to the apply to be
         inserted in the struct cleanup code.
@@ -448,10 +448,6 @@ class CLinkerOp(CLinkerObject):
         node : an Apply instance in the graph being compiled
         name : str
             A unique name to distinguish variables from those of other nodes.
-        sub : dict
-            A dictionary of values to substitute in the code.
-            Most notably it contains a 'fail' entry that you should place in
-            your code after setting a python exception to indicate an error.
 
         Raises
         ------
@@ -821,6 +817,16 @@ class Op(utils.object2, PureOp, CLinkerOp):
         else:
             return NotImplemented
 
+    def prepare_node(self, node):
+        """
+        Make any special modifications that the Op needs before doing
+        make_thunk().
+
+        This can either modify the node inplace or return a new one.
+
+        """
+        pass
+
     def make_c_thunk(self, node, storage_map, compute_map, no_recycling):
         """
         Like make_thunk, but will only try to make a C thunk.
@@ -929,6 +935,10 @@ class Op(utils.object2, PureOp, CLinkerOp):
 
         """
         logger = logging.getLogger('theano.gof.op.Op')
+
+        new_node = self.prepare_node(node)
+        if new_node is not None:
+            node = new_node
 
         if self._op_use_c_code:
             try:
@@ -1166,10 +1176,8 @@ int main( int argc, const char* argv[] )
                 self.openmp = False
                 theano.config.openmp = False
 
-    def make_thunk(self, node, storage_map, compute_map, no_recycling):
+    def prepare_node(self, node):
         self.update_self_openmp()
-        return super(OpenMPOp, self).make_thunk(node, storage_map,
-                                                compute_map, no_recycling)
 
 
 def simple_meth(tag):
@@ -1347,6 +1355,7 @@ class COp(Op):
     c_support_code = simple_meth('support_code')
     c_support_code_apply = apply_meth('support_code_apply')
     c_support_code_struct = apply_meth('support_code_struct')
+    c_cleanup_code_struct = apply_meth('cleanup_code_struct')
 
     def format_c_function_args(self, inp, out):
         # Generate an string containing the arguments sent to the external C
@@ -1451,20 +1460,6 @@ class COp(Op):
         else:
             raise utils.MethodNotDefined(
                 'c_init_code_struct', type(self), type(self).__name__)
-
-    def c_cleanup_code_struct(self, node, name, sub):
-        if 'cleanup_code_struct' in self.code_sections:
-            op_code = self.code_sections['cleanup_code_struct']
-
-            def_macros, undef_macros = self.get_c_macros(node, name)
-            def_sub, undef_sub = self.get_sub_macros(sub)
-
-            return os.linesep.join(['', def_macros, def_sub,
-                                    op_code,
-                                    undef_sub, undef_macros])
-        else:
-            raise utils.MethodNotDefined(
-                'c_cleanup_code_struct', type(self), type(self).__name__)
 
     def c_code(self, node, name, inp, out, sub):
         if self.func_name is not None:
